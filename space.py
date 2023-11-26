@@ -35,14 +35,14 @@ lips_image = pygame.image.load('MiniPixel3/Enemies/Lips (16 x 16).png')
 beam_image = pygame.image.load('MiniPixel3/Projectiles/Player_charged_beam (16 x 16).png')
 sparkle_image = pygame.image.load('MiniPixel3/Effects/Sparkle (16 x 16).png')
 bg_image = pygame.image.load('MiniPixel3/Space_BG (2 frames) (64 x 64).png')
-
-
+game_over_image = pygame.image.load('MiniPixel3/UI objects/GAME_OVER (72 x 8).png')
+game_over_image = pygame.transform.scale(game_over_image, (game_over_image.get_width() * 3, game_over_image.get_height() * 3))
 
 
 
 # 스프라이트 분할
-def split_sprite(sprite_image, split_num, ss = 2):
-    sprite_scale = ss
+def split_sprite(sprite_image, split_num, scale = 2):
+    sprite_scale = scale
     frames = []
     frame_width = sprite_image.get_width() // split_num
     frame_height = sprite_image.get_height()
@@ -77,13 +77,14 @@ bg_time = pygame.time.get_ticks()
 
 # Space Class
 class Space:
-    LEFT = 0
+    LEFT = 0 # 클래스 변수
     CENTER = 1
     RIGHT = 2
 
     def __init__(self):
-        self.image = space_image
-        self.idx = Space.CENTER
+        self.life = 3
+        self.image = space_image    # 인스턴스 변수
+        self.idx = Space.CENTER     # 클래스 변수 Space 클래스의 CENTER 변수
         self.booster_image = booster_images[self.idx]
         self.booster_image_idx = 0
         self.booster_time = pygame.time.get_ticks()
@@ -91,23 +92,30 @@ class Space:
         self.x = SCREEN_WIDTH // 2
         self.y = SCREEN_HEIGHT - self.size * 2
         self.speed = 3
-        self.rect = pygame.Rect(self.x, self.y, self.size, self.size)
-
+        self.rect = pygame.Rect(self.x, self.y, self.size, self.size)   # pygame Rect에는 충돌을 확인하는 함수 colliderect 사용 가능
 
     def move_left(self):
         self.idx = Space.LEFT
         if self.x > 0:
             self.x -= self.speed
 
+
     def move_right(self):
         self.idx = Space.RIGHT
         if self.x < SCREEN_WIDTH - self.size:
             self.x += self.speed
+
+    def draw_life(self):
+        for i in range(self.life):
+            win.blit(self.image[Space.CENTER], (270 + self.size * i + 10 * i, 10))
+
     def draw(self):
-        self.booster_image = booster_images[self.idx]
-        win.blit(self.image[self.idx], (self.x, self.y))
-        win.blit(self.booster_image[self.booster_image_idx], (self.x, self.y + self.size))
+        # space 그리기
         self.rect = pygame.Rect(self.x, self.y, self.size, self.size)
+        win.blit(self.image[self.idx], (self.x, self.y))
+        # booster 그리기
+        self.booster_image = booster_images[self.idx]
+        win.blit(self.booster_image[self.booster_image_idx], (self.x, self.y + self.size))
         if pygame.time.get_ticks() - self.booster_time > 50:
             self.booster_time = pygame.time.get_ticks()
             self.booster_image_idx += 1
@@ -115,10 +123,10 @@ class Space:
                 self.booster_image_idx = 0
 # Beam Class
 class Beam:
-    def __init__(self):
-        self.x = space.x
-        self.y = space.y
-        self.speed = 5
+    def __init__(self):     # 생성자는 객체 생성 시 자동으로 호출되는 함수
+        self.x = game.space.x
+        self.y = game.space.y
+        self.speed = 10
         self.img_idx = 0
         self.image = beam_image[self.img_idx]
         self.width = self.image.get_width()
@@ -143,9 +151,9 @@ class Enemy:
         self.image = enemy_image
         self.num = image_num
         self.idx = 0
-        self.size = 32
+        self.size = self.image[self.idx].get_width()
         self.x = random.randint(0, SCREEN_WIDTH - self.size)
-        self.y = random.randint(-self.size * 3, - self.size)
+        self.y = -self.size
         self.speed = speed
         self.time = pygame.time.get_ticks()
         self.remove = False
@@ -172,23 +180,36 @@ class Alan(Enemy):
     def __init__(self):
         super().__init__(alan_image, alan_image_num, 3, 50)
 
+    def move(self):
+        if game.score > 100:
+            self.x += random.choice([1, -1, 2, -2, 3, -3, 5, -5])
+        super().move()
 
 # Bon(Enemy) Class
 class Bon(Enemy):
     def __init__(self):
-        self.sx = 1
+        self.sx = 10
         super().__init__(bon_image, bon_image_num, 1, 80)
 
-    def move(self):
+    def move(self):     # method overriding 메소드 오버라이딩
         self.x += self.sx
         if self.x > SCREEN_WIDTH or self.x < 0:
             self.sx *= -1
-        super().move()
+            self.y += self.size
 
 # Lips(Enemy) Class
 class Lips(Enemy):
     def __init__(self):
         super().__init__(lips_image, lips_image_num, 4, 50)
+
+    def move(self):
+        if game.score > 500:
+            if self.x - game.space.x < 0:
+                self.x += 1
+            else:
+                self.x -= 1
+        super().move()
+
 # Explode Class
 class Sparkle:
     def __init__(self, sx, sy):
@@ -225,78 +246,113 @@ def draw_bg():
         if bg_idx > bg_image_num - 1:
             bg_idx = 0
 
+class Game:
+    def __init__(self):
+        self.running = True
+        self.game_over = False
+        self.space = Space()  # 우주선 객체 생성
+        self.sparkles = []
+        self.beams = []  # 미사일 초기화
+        self.enemy = [random.choice([Alan(), Bon(), Lips()])]
+        self.enemy_add_time = pygame.time.get_ticks()
+        self.ENEMY_TIME = 300
+        self.score = 0
 
-# 게임 초기화
+    def key_input(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+            if event.type == pygame.KEYUP:
+                self.space.idx = Space.CENTER
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    self.beams.append(Beam())
 
-space = Space()  # 우주선 객체 생성
-sparkles = []
-beams = []#미사일 초기화
+        pressed = pygame.key.get_pressed()
+        if pressed[pygame.K_LEFT]:
+            self.space.move_left()
+        if pressed[pygame.K_RIGHT]:
+            self.space.move_right()
+        if game.game_over:
+            if pressed[pygame.K_y]:
+                self.__init__()
 
-# 적 리스트 생성
-enemy = [Alan()]
-enemy_add_time = pygame.time.get_ticks()
-ENEMY_TIME = 1000
+    def check_beam(self):
+        for beam in self.beams:
+            beam.move()
+            # 충돌 처리
+            for x in self.enemy:
+                if beam.rect.colliderect(x.rect):
+                    self.score += 10
+                    if self.score % 100 == 0:
+                        if self.ENEMY_TIME >= 100:
+                            self.ENEMY_TIME -= 10
 
-# 플레이어 생성
-# 미사일 리스트 생성
+                    self.sparkles.append(Sparkle(x.x, x.y))
+                    beam.remove = True
+                    x.remove = True
+            if beam.remove:
+                self.beams.remove(beam)
+
+    def add_enemy(self):
+        if pygame.time.get_ticks() - self.enemy_add_time > self.ENEMY_TIME:
+            self.enemy_add_time = pygame.time.get_ticks()
+            self.enemy.append(random.choice([Alan(), Bon(), Lips()]))
+
+    def move_enemy(self):
+        for one_enemy in self.enemy:
+            one_enemy.move()
+            if one_enemy.remove:
+                self.enemy.remove(one_enemy)
+            if one_enemy.rect.colliderect(self.space.rect):
+                one_enemy.remove = True
+                self.space.life -= 1
+                if self.space.life < 1:
+                    self.game_over = True
+                if one_enemy.remove:
+                    self.enemy.remove(one_enemy)
+
+    def gameover(self):
+        win.blit(game_over_image, (SCREEN_WIDTH // 2 - game_over_image.get_width() // 2, SCREEN_HEIGHT // 2))
+
+    def draw_object(self):
+        for b in self.beams:
+            b.draw()
+        self.space.draw()
+        for one in self.enemy:
+            one.draw()
+        for one in self.sparkles:
+            one.draw()
+            if one.remove:
+                self.sparkles.remove(one)
+    def draw_info(self):
+        pygame.draw.rect(win, 'black', (0, 0, SCREEN_WIDTH, 40))
+        font = pygame.font.SysFont('D2Coding', 30)
+        score_text = font.render(f'SCORE: {self.score:06d}', True, 'WHITE')
+        win.blit(score_text, (10, 5))
+        self.space.draw_life()
+
+
+
+
+game = Game()
 
 # 게임 루프
-running = True
-while running:
-    # 키 입력 처리
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        if event.type == pygame.KEYUP:
-            space.idx = Space.CENTER
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                beams.append(Beam())
-
-    pressed = pygame.key.get_pressed()
-    if pressed[pygame.K_LEFT]:
-        space.move_left()
-    if pressed[pygame.K_RIGHT]:
-        space.move_right()
-    #if pressed[pygame.K_SPACE]:
-     #   beams.append(Beam())
-
-
-    # 미사일 이동
-
-    for one in beams:
-        one.move()
-        # 충돌 처리
-        for x in enemy:
-            if one.rect.colliderect(x.rect):
-                sparkles.append(Sparkle(x.x, x.y))
-                one.remove = True
-                x.remove = True
-        if one.remove:
-            beams.remove(one)
-    # 적추가
-    if pygame.time.get_ticks() - enemy_add_time > ENEMY_TIME:
-        enemy_add_time = pygame.time.get_ticks()
-        enemy.append(random.choice([Alan(), Bon(), Lips()]))
-
-    # 적 이동
-    for one in enemy:
-        one.move()
-        if one.remove:
-            enemy.remove(one)
-    # 화면 표시
-    win.fill('black')
+while game.running:
+    game.key_input()
     draw_bg()
-    for b in beams:
-        b.draw()
-    space.draw()
-    for one in enemy:
-        one.draw()
-    for one in sparkles:
-        one.draw()
-        if one.remove:
-            sparkles.remove(one)
+    if not game.game_over:
+        game.check_beam()
+        game.add_enemy()
+        game.move_enemy()
+        game.draw_object()
+    else:
+        game.gameover()
+    game.draw_info()
     pygame.display.update()
     clock.tick(60)
+
+    # 화면 표시
+
 
 pygame.quit()  # 파이게임 종료
